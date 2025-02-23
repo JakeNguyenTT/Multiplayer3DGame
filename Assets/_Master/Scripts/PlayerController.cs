@@ -7,16 +7,16 @@ using UnityEngine;
 public class PlayerController : NetworkBehaviour
 {
     [Header("Player")]
-    [SerializeField] private float m_WalkSpeed = 3.5f;
+    [SerializeField] private float m_WalkSpeed = 2f;
 
-    [SerializeField] private float m_RunSpeedOffset = 2.0f;
+    [SerializeField] private float m_RunSpeed = 5.335f;
 
     [SerializeField] private float m_RotationSpeed = 3.5f;
 
     [SerializeField] private float m_JumpHeight = 1.2f;
 
     [SerializeField] private float m_Gravity = -15.00f;
-
+    [SerializeField][Range(0.0f, 0.3f)] private float RotationSmoothTime = 0.12f;
     [SerializeField] private Vector2 m_DefaultInitialPositionOnPlane = new Vector2(-4, 4);
 
     [Header("Grounded")]
@@ -47,21 +47,35 @@ public class PlayerController : NetworkBehaviour
     [SerializeField] private AudioClip[] m_FootstepAudioClips;
     [SerializeField] private float m_FootstepAudioVolume = 0.5f;
 
+    [Header("Cinemachine")]
+    [SerializeField] private GameObject m_CinemachineCameraTarget;
 
+    [SerializeField] private float m_TopClamp = 70.0f;
+
+    [SerializeField] private float m_BottomClamp = -30.0f;
+
+    [SerializeField] private float m_CameraAngleOverride = 0.0f;
+
+    [SerializeField] private bool m_LockCameraPosition = false;
 
     [Header("Read Only")]
-
+    [SerializeField] private float m_Speed = 0;
     [SerializeField] private bool m_IsGrounded = false;
     [SerializeField] private float m_VerticalVelocity = 0;
+    [SerializeField] private float m_RotationVelocity;
     [SerializeField] private PlayerState m_OldPlayerState = PlayerState.Idle;
-    // client caches positions
+
+    [Header("Cinemachine")]
+    [SerializeField] private float m_CinemachineTargetYaw;
+    [SerializeField] private float m_CinemachineTargetPitch;
+    [Header("Client Caches")]
     [SerializeField] private Vector3 m_OldInputPosition = Vector3.zero;
     [SerializeField] private Vector3 m_OldInputRotation = Vector3.zero;
 
     private CharacterController m_CharacterController;
 
     private Animator m_Animator;
-
+    private const float m_Threshold = 0.01f;
 
     private void Awake()
     {
@@ -75,8 +89,7 @@ public class PlayerController : NetworkBehaviour
         {
             transform.position = new Vector3(Random.Range(m_DefaultInitialPositionOnPlane.x, m_DefaultInitialPositionOnPlane.y), 0,
                    Random.Range(m_DefaultInitialPositionOnPlane.x, m_DefaultInitialPositionOnPlane.y));
-
-            PlayerCameraFollow.Instance.FollowPlayer(transform.Find("PlayerCameraRoot"));
+            m_CinemachineTargetYaw = m_CinemachineCameraTarget.transform.rotation.eulerAngles.y;
         }
     }
 
@@ -101,6 +114,31 @@ public class PlayerController : NetworkBehaviour
                 CheckPunch(m_RightHand.transform, Vector3.down);
             }
         }
+    }
+
+    void LateUpdate()
+    {
+        CameraRotation();
+    }
+
+    private void CameraRotation()
+    {
+        // if there is an input and camera position is not fixed
+        if (Input.mousePosition.sqrMagnitude >= m_Threshold && !m_LockCameraPosition)
+        {
+            //Don't multiply mouse input by Time.deltaTime;
+            float deltaTimeMultiplier = 1.0f;
+
+            m_CinemachineTargetYaw += Input.mousePosition.x * deltaTimeMultiplier;
+            m_CinemachineTargetPitch += Input.mousePosition.y * deltaTimeMultiplier;
+        }
+
+        // clamp our rotations so our values are limited 360 degrees
+        m_CinemachineTargetYaw = ClampAngle(m_CinemachineTargetYaw, float.MinValue, float.MaxValue);
+        m_CinemachineTargetPitch = ClampAngle(m_CinemachineTargetPitch, m_BottomClamp, m_TopClamp);
+
+        m_CinemachineCameraTarget.transform.rotation = Quaternion.Euler(m_CinemachineTargetPitch + m_CameraAngleOverride,
+            m_CinemachineTargetYaw, 0.0f);
     }
 
     private void CheckPunch(Transform hand, Vector3 aimDirection)
@@ -134,7 +172,8 @@ public class PlayerController : NetworkBehaviour
         }
         if (m_NetworkRotationDirection.Value != Vector3.zero)
         {
-            transform.Rotate(m_NetworkRotationDirection.Value, Space.World);
+            transform.rotation = Quaternion.Euler(m_NetworkRotationDirection.Value);
+            // transform.Rotate(m_NetworkRotationDirection.Value, Space.World);
         }
     }
 
@@ -153,20 +192,117 @@ public class PlayerController : NetworkBehaviour
 
     private void ClientInput()
     {
-        // left & right rotation
-        Vector3 inputRotation = new Vector3(0, Input.GetAxis("Horizontal"), 0);
+        JumpInput();
 
-        // forward & backward direction
-        Vector3 direction = transform.TransformDirection(Vector3.forward);
-        float forwardInput = Input.GetAxis("Vertical");
-        Vector3 inputPosition = direction * forwardInput;
+        var horizontal = Input.GetAxis("Horizontal");
+        var vertical = Input.GetAxis("Vertical");
 
+        // change fighting states
+        if (ActivePunchActionKey() && vertical == 0 && horizontal == 0)
+        {
+            UpdatePlayerStateServerRpc(PlayerState.Punch);
+            return;
+        }
+
+        float targetSpeed = ActiveRunningActionKey() ? m_RunSpeed : m_WalkSpeed;
+        if (horizontal == 0 && vertical == 0) targetSpeed = 0.0f;
+
+        float currentSpeed = new Vector3(m_CharacterController.velocity.x, 0.0f, m_CharacterController.velocity.z).magnitude;
+        float speedOffset = 0.1f;
+        // if (currentSpeed < targetSpeed - speedOffset ||
+        //     currentSpeed > targetSpeed + speedOffset)
+        // {
+        //     m_Speed = Mathf.Lerp(currentSpeed, targetSpeed, Time.deltaTime * 10);
+        //     m_Speed = Mathf.Round(currentSpeed * 1000f) / 1000f;
+        // }
+        // else
+        {
+            m_Speed = targetSpeed;
+        }
+
+        Vector3 inputPosition = Vector3.zero;
+        Vector3 inputRotation = Vector3.zero;
+
+        Vector3 direction = new Vector3(horizontal, 0, vertical).normalized;
+
+        if (vertical != 0 || horizontal != 0)
+        {
+            float targetRotation = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg + Camera.main.transform.eulerAngles.y;
+            float rotation = Mathf.SmoothDampAngle(transform.eulerAngles.y, targetRotation, ref m_RotationVelocity, RotationSmoothTime);
+
+            inputRotation = new Vector3(0.0f, rotation, 0.0f);
+            inputPosition = Quaternion.Euler(inputRotation) * Vector3.forward;
+
+            // left & right rotation
+            // Vector3 inputRotation = new Vector3(0, horizontal, 0);
+
+            // // forward & backward direction
+            // Vector3 direction = transform.TransformDirection(Vector3.forward);
+            // Vector3 inputPosition = direction * vertical;
+
+            if (m_IsGrounded)
+            {
+                if (m_NetworkPlayerState.Value != PlayerState.Walk && !ActiveRunningActionKey())
+                {
+                    UpdatePlayerStateServerRpc(PlayerState.Walk);
+                }
+                else if (m_NetworkPlayerState.Value != PlayerState.Run && ActiveRunningActionKey())
+                {
+                    UpdatePlayerStateServerRpc(PlayerState.Run);
+                }
+            }
+        }
+        else
+        {
+            if (m_IsGrounded)
+            {
+                UpdatePlayerStateServerRpc(PlayerState.Idle);
+            }
+        }
+
+        // let server know about position and rotation client changes
+        if (m_OldInputPosition != inputPosition ||
+            m_OldInputRotation != inputRotation ||
+            m_VerticalVelocity != 0)
+        {
+            m_OldInputPosition = inputPosition;
+            m_OldInputRotation = inputRotation;
+            UpdateClientPositionAndRotationServerRpc((inputPosition * m_Speed + Vector3.up * m_VerticalVelocity) * Time.deltaTime, inputRotation);
+        }
+
+        // change motion states
+        // if (vertical == 0)
+        //     UpdatePlayerStateServerRpc(PlayerState.Idle);
+        // else if (!ActiveRunningActionKey() && vertical > 0 && vertical <= 1)
+        //     UpdatePlayerStateServerRpc(PlayerState.Walk);
+        // else if (ActiveRunningActionKey() && vertical > 0 && vertical <= 1)
+        // {
+        //     inputPosition = direction * m_RunSpeedOffset;
+        //     UpdatePlayerStateServerRpc(PlayerState.Run);
+        // }
+        // else if (vertical < 0)
+        //     UpdatePlayerStateServerRpc(PlayerState.ReverseWalk);
+
+        // // let server know about position and rotation client changes
+        // if (m_OldInputPosition != inputPosition ||
+        //     m_OldInputRotation != inputRotation ||
+        //     m_VerticalVelocity != 0)
+        // {
+        //     m_OldInputPosition = inputPosition;
+        //     m_OldInputRotation = inputRotation;
+        //     UpdateClientPositionAndRotationServerRpc((inputPosition * m_WalkSpeed + Vector3.up * m_VerticalVelocity) * Time.deltaTime, inputRotation * m_RotationSpeed);
+        // }
+    }
+
+    void JumpInput()
+    {
         if (m_IsGrounded)
         {
+            m_Animator.ResetTrigger("Jump");
             if (ActiveJumpActionKey())
             {
                 m_VerticalVelocity = Mathf.Sqrt(m_JumpHeight * -2f * m_Gravity);
-                //UpdatePlayerStateServerRpc(PlayerState.Jump);
+                UpdatePlayerStateServerRpc(PlayerState.Jump);
             }
             if (m_VerticalVelocity < 0.0f)
             {
@@ -176,36 +312,6 @@ public class PlayerController : NetworkBehaviour
         else
         {
             m_VerticalVelocity += m_Gravity * Time.deltaTime;
-        }
-
-        // change fighting states
-        if (ActivePunchActionKey() && forwardInput == 0)
-        {
-            UpdatePlayerStateServerRpc(PlayerState.Punch);
-            return;
-        }
-
-        // change motion states
-        if (forwardInput == 0)
-            UpdatePlayerStateServerRpc(PlayerState.Idle);
-        else if (!ActiveRunningActionKey() && forwardInput > 0 && forwardInput <= 1)
-            UpdatePlayerStateServerRpc(PlayerState.Walk);
-        else if (ActiveRunningActionKey() && forwardInput > 0 && forwardInput <= 1)
-        {
-            inputPosition = direction * m_RunSpeedOffset;
-            UpdatePlayerStateServerRpc(PlayerState.Run);
-        }
-        else if (forwardInput < 0)
-            UpdatePlayerStateServerRpc(PlayerState.ReverseWalk);
-
-        // let server know about position and rotation client changes
-        if (m_OldInputPosition != inputPosition ||
-            m_OldInputRotation != inputRotation ||
-            m_VerticalVelocity != 0)
-        {
-            m_OldInputPosition = inputPosition;
-            m_OldInputRotation = inputRotation;
-            UpdateClientPositionAndRotationServerRpc((inputPosition * m_WalkSpeed + Vector3.up * m_VerticalVelocity) * Time.deltaTime, inputRotation * m_RotationSpeed);
         }
     }
 
@@ -263,6 +369,7 @@ public class PlayerController : NetworkBehaviour
     [ServerRpc]
     public void UpdatePlayerStateServerRpc(PlayerState state)
     {
+        Debug.Log($"State: <color=red>{state}</color>");
         m_NetworkPlayerState.Value = state;
         if (state == PlayerState.Punch)
         {
@@ -272,11 +379,9 @@ public class PlayerController : NetworkBehaviour
 
     private void GroundedCheck()
     {
-        // set sphere position, with offset
         Vector3 spherePosition = new Vector3(transform.position.x, transform.position.y - m_GroundedOffset, transform.position.z);
         m_IsGrounded = Physics.CheckSphere(spherePosition, m_GroundedRadius, m_GroundedLayers, QueryTriggerInteraction.Ignore);
 
-        // update animator if using character
         if (m_Animator)
         {
             m_Animator.SetBool("Grounded", m_IsGrounded);
@@ -301,5 +406,12 @@ public class PlayerController : NetworkBehaviour
         {
             AudioSource.PlayClipAtPoint(m_LandingAudioClip, transform.TransformPoint(m_CharacterController.center), m_FootstepAudioVolume);
         }
+    }
+
+    private static float ClampAngle(float lfAngle, float lfMin, float lfMax)
+    {
+        if (lfAngle < -360f) lfAngle += 360f;
+        if (lfAngle > 360f) lfAngle -= 360f;
+        return Mathf.Clamp(lfAngle, lfMin, lfMax);
     }
 }

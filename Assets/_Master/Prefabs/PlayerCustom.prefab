@@ -855,10 +855,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   ShowTopMostFoldoutHeaderGroup: 1
   m_WalkSpeed: 3.5
-  m_RunSpeedOffset: 2
+  m_RunSpeed: 5.335
   m_RotationSpeed: 3.5
   m_JumpHeight: 1.2
   m_Gravity: -15
+  RotationSmoothTime: 0.12
   m_DefaultInitialPositionOnPlane: {x: -4, y: 4}
   m_GroundedOffset: -0.14
   m_GroundedRadius: 0.28
@@ -891,9 +892,18 @@ MonoBehaviour:
   - {fileID: 8300000, guid: 274649b0e221539409070ebf6c18918b, type: 3}
   - {fileID: 8300000, guid: a3194b8bbc96ef84fab1f98f4b7dae3e, type: 3}
   m_FootstepAudioVolume: 0.5
+  m_CinemachineCameraTarget: {fileID: 5888737537590512795}
+  m_TopClamp: 70
+  m_BottomClamp: -30
+  m_CameraAngleOverride: 0
+  m_LockCameraPosition: 0
+  m_Speed: 0
   m_IsGrounded: 1
   m_VerticalVelocity: 0
+  m_RotationVelocity: 0
   m_OldPlayerState: 0
+  m_CinemachineTargetYaw: 0
+  m_CinemachineTargetPitch: 0
   m_OldInputPosition: {x: 0, y: 0, z: 0}
   m_OldInputRotation: {x: 0, y: 0, z: 0}
 --- !u!1 &2439462815760529262
