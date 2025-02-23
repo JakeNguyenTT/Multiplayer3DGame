@@ -104,7 +104,7 @@ public class PlayerWithRaycastControl : NetworkBehaviour
 
             var playerHit = hit.transform.GetComponent<NetworkObject>();
             if (playerHit != null)
-            { 
+            {
                 UpdateHealthServerRpc(1, playerHit.OwnerClientId);
             }
         }

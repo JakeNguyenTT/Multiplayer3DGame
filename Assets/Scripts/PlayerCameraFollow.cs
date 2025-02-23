@@ -10,11 +10,11 @@ public class PlayerCameraFollow : Singleton<PlayerCameraFollow>
     [SerializeField]
     private float frequencyGain = 0.5f;
 
-    private CinemachineVirtualCamera cinemachineVirtualCamera;
+    private CinemachineCamera cinemachineVirtualCamera;
 
     private void Awake()
     {
-        cinemachineVirtualCamera = GetComponent<CinemachineVirtualCamera>();
+        cinemachineVirtualCamera = GetComponent<CinemachineCamera>();
     }
 
     public void FollowPlayer(Transform transform)
@@ -23,9 +23,5 @@ public class PlayerCameraFollow : Singleton<PlayerCameraFollow>
         if (cinemachineVirtualCamera == null) return;
 
         cinemachineVirtualCamera.Follow = transform;
-
-        var perlin = cinemachineVirtualCamera.GetCinemachineComponent<CinemachineBasicMultiChannelPerlin>();
-        perlin.AmplitudeGain = amplitudeGain;
-        perlin.FrequencyGain = frequencyGain;
     }
 }

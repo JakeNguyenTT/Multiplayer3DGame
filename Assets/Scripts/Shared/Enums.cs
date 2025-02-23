@@ -5,4 +5,5 @@
     Run,
     Punch,
     ReverseWalk,
+    Jump,
 }
